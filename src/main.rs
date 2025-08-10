@@ -1,5 +1,6 @@
 use clap::Parser;
 use image::ImageFormat;
+use owo_colors::OwoColorize;
 use picpress::{compress_img, determine_output_format, Result, PicPressError};
 
 fn parse_resize(s: &str) -> Result<(u32, u32)> {
@@ -48,29 +49,32 @@ fn main() -> Result<()>{
 
     let fmt = determine_output_format(&args.output, args.format.clone())?;
 
-    println!("Input file: {}", args.input);
-    println!("Output file: {}", args.output);
+    println!("{}", format!("Input file: {}", args.input).green());
+    println!("{}", format!("Output file: {}", args.output).green());
     match fmt{
         ImageFormat::Avif | ImageFormat::Jpeg | ImageFormat::WebP => {
-            println!("Quality: {}", args.quality);
+            println!("{}", format!("Quality: {}", args.quality).green());
             if fmt == ImageFormat::Avif{
-                println!("Speed: {}", args.speed);
+                if args.speed < 1 || args.speed > 10{
+                    return Err(PicPressError::ParameterError("Speed must be between 1-10".to_string()));
+                }
+                println!("{}", format!("Speed: {}", args.speed).green());
             }
         }
         _ => {
-            println!("Quality: Output format not support");
+            println!("{}", "warning: the format not supports `-q` or `--quality`".yellow());
         }
     }
     if args.resize.is_some(){
         let temp = args.resize.clone();
         let temp = temp.unwrap();
-        println!("Resize: {}x{}", temp.0, temp.1);
+        println!("{}", format!("Resize: {}x{}", temp.0, temp.1).green());
 
         if args.method.is_none(){
-            println!("Resize Style: fit")
+            println!("{}", "Resize Style: fit".green())
         }else{
             let temp2 = args.method.clone();
-            println!("Resize Style: {}", temp2.unwrap());
+            println!("{}", format!("Resize Style: {}", temp2.unwrap()).green());
         }
     }
 

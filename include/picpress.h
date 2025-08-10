@@ -35,7 +35,7 @@ enum PicPressError{
 };
 
 
-int compress_img_c(const char* input, const char* ouput, const char* format, uint8_t quality, uint32_t width, uint32_t height, ResizeStyle method, uint8_t speed);
+int compress_img_c(const char* input, const char* ouput, const char* format, uint8_t quality, uint32_t width, uint32_t height, int method, uint8_t speed);
 
 
 #ifdef __cplusplus

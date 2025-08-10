@@ -103,14 +103,16 @@ fn resize_image(img: &DynamicImage, dimensions:Option<(u32, u32)>, method:Option
 }
 
 pub fn compress_img(input:&str, output:&str, format:Option<String>,  quality:u8, resize:Option<(u32,u32)>, method:Option<&str>, speed:u8)->Result<()>{
-    let img = image::open(input)?;
+    let mut img = image::open(input)?;
 
     let output_format = determine_output_format(output, format)?;
 
     let output_path = Path::new(output);
     let mut output_file = File::create(output_path)?;
 
-    let img = resize_image(&img, resize, method)?;
+    if resize.is_some(){
+        img = resize_image(&img, resize, method)?;
+    }
     match output_format{
         ImageFormat::Jpeg => {
             let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output_file, quality);
