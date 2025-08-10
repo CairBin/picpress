@@ -31,7 +31,7 @@ picpress -i a.png -o b.jpeg -r 800x600
 
 Specify the style for picture resize, supported fill/fit/exact
 ```sh
-picpress -i a.png -o b.jpeg -r 800*600 -m fill
+picpress -i a.png -o b.jpeg -r 800x600 -m fill
 ```
 
 For more details:
