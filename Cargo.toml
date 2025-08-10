@@ -9,3 +9,8 @@ image="0.24"
 anyhow="1.0.98"
 webp="0.2"
 ravif="0.12"
+owo-colors="4.2.1"
+thiserror = "1.0"
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]

@@ -1,35 +1,61 @@
-use anyhow::{Context, Result};
 use image::imageops::FilterType;
-use image::{DynamicImage, ImageFormat, RgbImage};
+use image::{DynamicImage, ImageError, ImageFormat, RgbImage};
 use ravif::RGBA8;
+use std::ffi::{c_char, CStr};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use thiserror::Error;
+#[derive(Error, Debug)]
+pub enum PicPressError{
+    #[error("Invalid format `{0}`")]
+    InvalidFormat(String),
 
-pub fn determine_output_format(output_path:&str, format:Option<&str>)->Result<ImageFormat>{
-    if let Some(fmt) = format{
-        match fmt.to_lowercase().as_str(){
-            "jpeg" | "jpg" => Ok(ImageFormat::Jpeg),
-            "png" => Ok(ImageFormat::Png),
-            "webp" => Ok(ImageFormat::WebP),
-            "avif" => Ok(ImageFormat::Avif),
-            _ => Err(anyhow::anyhow!("Unsupported format: {}", fmt)),
-        }
-    }else {
-        let path = Path::new(output_path);
-        let ext = path.extension()
-            .and_then(|e| e.to_str())
-            .ok_or_else(|| anyhow::anyhow!("Cannot infer the format."))?;
+    #[error("Cannot infer format")]
+    InferFormatError,
 
-        match ext.to_lowercase().as_str(){
-            "jpeg" | "jpg" => Ok(ImageFormat::Jpeg),
-            "png" => Ok(ImageFormat::Png),
-            "webp" => Ok(ImageFormat::WebP),
-            "avif" => Ok(ImageFormat::Avif),
-            _ => Err(anyhow::anyhow!("Unsupported format: {}", ext)),
-        }
+    #[error("Invalid method `{0}`")]
+    InvalidMethod(String),
+
+    // image lib internal error
+    #[error("Image error: {0}")]
+    ImageError(#[from] ImageError),
+
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Compression error: picture format = `{0}`. Details: {1}")]
+    CompressError(String, String),
+
+    #[error("Command parameter error: {0}")]
+    ParameterError(String)
+}
+
+pub type Result<T> = std::result::Result<T, PicPressError>;
+
+
+pub fn get_fmt_from_str(s: &str) -> Result<ImageFormat>{
+    match s.to_lowercase().as_str() {
+        "jpeg" | "jpg" => Ok(ImageFormat::Jpeg),
+        "png" => Ok(ImageFormat::Png),
+        "webp" => Ok(ImageFormat::WebP),
+        "avif" => Ok(ImageFormat::Avif),
+        _ => Err(PicPressError::InvalidFormat(s.to_string()))
     }
 }
+
+pub fn determine_output_format(output_path: &str, format: Option<String>) -> Result<ImageFormat>{
+    let fmt = if format.is_none(){
+        let path = Path::new(output_path);
+        let ext = path.extension().and_then(|e| e.to_str()).ok_or_else(|| PicPressError::InferFormatError)?;
+        ext.to_string()
+    }else{
+        format.unwrap()
+    };
+
+    return get_fmt_from_str(&fmt);
+}
+
 
 fn convert_to_rgb8(img: &DynamicImage) ->RgbImage{
     match img {
@@ -63,7 +89,7 @@ fn resize_image(img: &DynamicImage, dimensions:Option<(u32, u32)>, method:Option
                 }else if m == "fit"{
                     return Ok(img.resize(width, height, FilterType::Lanczos3));
                 }else{
-                    return Err(anyhow::anyhow!("Unsupported method"));
+                    return Err(PicPressError::InvalidMethod(m.to_string()));
                 }
             }
 
@@ -76,16 +102,13 @@ fn resize_image(img: &DynamicImage, dimensions:Option<(u32, u32)>, method:Option
     Ok(img.clone())
 }
 
-pub fn compress_img(input:&str, output:&str, format:Option<&str>,  quality:u8, resize:Option<(u32,u32)>, method:Option<&str>, speed:u8)->Result<()>{
-    let img = image::open(input)
-        .with_context(|| format!("Cannot open the picture {}", input))?;
+pub fn compress_img(input:&str, output:&str, format:Option<String>,  quality:u8, resize:Option<(u32,u32)>, method:Option<&str>, speed:u8)->Result<()>{
+    let img = image::open(input)?;
 
-    let output_format = determine_output_format(output, format)
-        .with_context(|| "Cannot ensure ouput format.")?;
+    let output_format = determine_output_format(output, format)?;
 
     let output_path = Path::new(output);
-    let mut output_file = File::create(output_path)
-        .with_context(|| format!("Cannot create output file {}", output))?;
+    let mut output_file = File::create(output_path)?;
 
     let img = resize_image(&img, resize, method)?;
     match output_format{
@@ -98,17 +121,17 @@ pub fn compress_img(input:&str, output:&str, format:Option<&str>,  quality:u8, r
                 rgb_img.width(),
                 rgb_img.height(),
                 image::ColorType::Rgb8
-            ).with_context(|| "Failed to compress the picture. format = jpeg")?;
+            ).map_err(|e| PicPressError::CompressError("jpeg".to_string(), e.to_string()))?;
         },
         ImageFormat::Png=>{
             img.write_to(&mut output_file, ImageFormat::Png)
-                .with_context(|| "Failed to compress the picture. format = png")?;
+                .map_err(|e| PicPressError::CompressError("png".to_string(), e.to_string()))?;
         },
         ImageFormat::WebP => {
             let encoder = webp::Encoder::new(img.as_bytes(), webp::PixelLayout::Rgb, img.width(), img.height());
             let buf = encoder.encode(quality as f32);
             output_file.write_all(&buf)
-                .with_context(|| "Failed to compress the picture. format = webp")?;
+                .map_err(|e| PicPressError::CompressError("webp".to_string(), e.to_string()))?;
         },
         ImageFormat::Avif => {
             let rgba_img = img.to_rgba8();
@@ -127,14 +150,118 @@ pub fn compress_img(input:&str, output:&str, format:Option<&str>,  quality:u8, r
                 .with_quality(quality as f32)
                 .with_speed(speed)
                 .with_internal_color_model(ravif::ColorModel::RGB)
-                .encode_rgba(img_data)?;
+                .encode_rgba(img_data)
+                .map_err(|e| PicPressError::CompressError("avif".to_string(), e.to_string()))?;
             output_file.write_all(&res.avif_file)?;
         }
 
         _ => {
-            return Err(anyhow::anyhow!("Unsupported format"));
+            return Err(PicPressError::InvalidFormat("Unknow".to_string()));
         }
     }
 
     Ok(())
+}
+
+
+#[unsafe(no_mangle)]
+pub extern "C" fn compress_img_c(
+    input: *const c_char,
+    output: *const c_char,
+    format: *const c_char,
+    quality: u8,
+    width: u32,
+    height: u32,
+    method: u8,
+    speed: u8
+)->i32{
+    if input.is_null() || output.is_null(){
+        return -1;
+    }
+
+    let resize = if width <= 0 || height <=0{
+        None
+    }else{
+        Some((width, height))
+    };
+    let quality = if quality <= 0 || quality >100{
+        100
+    }else {
+        quality
+    };
+
+    let speed = if speed > 10 || speed < 1{
+        4
+    }else{
+        speed
+    };
+
+    let method = match method{
+        1 => {
+            Some("fill")
+        },
+        3 => {
+            Some("exact")
+        },
+        _ => {
+            Some("fit")
+        }
+    };
+
+    let input = unsafe{CStr::from_ptr(input)}.to_str();
+    if input.is_err(){
+        return -1;
+    }
+    let output = unsafe{CStr::from_ptr(output)}.to_str();
+    if output.is_err(){
+        return -1;
+    }
+    let fmt: Option<String>;
+    if format.is_null(){
+        fmt = None;
+    }else{
+        let fmt_res = unsafe{CStr::from_ptr(format)}.to_str();
+        if fmt_res.is_err(){
+            fmt = None;
+        }else{
+            fmt = Some(fmt_res.unwrap().to_string());
+        }
+    }
+    let input = input.unwrap();
+    let output = output.unwrap();
+
+
+    let res = compress_img(input, output, fmt, quality, resize, method, speed);
+    if res.is_ok() {
+        return 0;
+    }
+
+    /*
+enum PicPressError{
+    PP_INVALID_FORMAT = -2,
+
+    PP_INFER_FORMAT_ERROR = -3,
+
+    PP_INVALID_METHOD = -4,
+
+    // image lib internal error
+    PP_IMAGE_ERROR = -5,
+
+    PP_IO_ERROR = -6,
+
+    PP_COMPRESS_ERROR = -7,
+
+    PP_OTHER_ERROR = -1
+};
+ */
+
+    match res.unwrap_err(){
+        PicPressError::InvalidFormat(_) => -2,
+        PicPressError::InferFormatError => -3,
+        PicPressError::InvalidMethod(_) => -4,
+        PicPressError::ImageError(_) => -5,
+        PicPressError::IoError(_) => -6,
+        PicPressError::CompressError(_, _) => -7,
+        _ => -1
+    }
 }
