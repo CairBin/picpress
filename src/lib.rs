@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-fn determine_output_format(output_path:&str, format:Option<&str>)->Result<ImageFormat>{
+pub fn determine_output_format(output_path:&str, format:Option<&str>)->Result<ImageFormat>{
     if let Some(fmt) = format{
         match fmt.to_lowercase().as_str(){
             "jpeg" | "jpg" => Ok(ImageFormat::Jpeg),
@@ -76,7 +76,7 @@ fn resize_image(img: &DynamicImage, dimensions:Option<(u32, u32)>, method:Option
     Ok(img.clone())
 }
 
-pub fn compress_img(input:&str, output:&str, format:Option<&str>,  quality:u8, resize:Option<(u32,u32)>, method:Option<&str>)->Result<()>{
+pub fn compress_img(input:&str, output:&str, format:Option<&str>,  quality:u8, resize:Option<(u32,u32)>, method:Option<&str>, speed:u8)->Result<()>{
     let img = image::open(input)
         .with_context(|| format!("Cannot open the picture {}", input))?;
 
@@ -125,7 +125,7 @@ pub fn compress_img(input:&str, output:&str, format:Option<&str>,  quality:u8, r
             let img_data = ravif::Img::new(rgba_slice, width as usize, height as usize);
             let res = ravif::Encoder::new()
                 .with_quality(quality as f32)
-                .with_speed(4)
+                .with_speed(speed)
                 .with_internal_color_model(ravif::ColorModel::RGB)
                 .encode_rgba(img_data)?;
             output_file.write_all(&res.avif_file)?;

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use picpress::compress_img;
+use image::ImageFormat;
+use picpress::{compress_img, determine_output_format};
 
 fn parse_resize(s: &str) -> Result<(u32, u32)> {
     let parts: Vec<&str> = s.split('x').collect();
@@ -33,7 +34,10 @@ struct Args{
     resize: Option<(u32, u32)>,
 
     #[arg(short, long, help="Resize style")]
-    method: Option<String>
+    method: Option<String>,
+
+    #[arg(short, long, default_value_t = 4, help="AVIF speed")]
+    speed: u8
 }
 
 fn main() -> Result<()>{
@@ -43,22 +47,34 @@ fn main() -> Result<()>{
         return Err(anyhow::anyhow!("The quality must be between 1-100."));
     }
 
+    let fmt = determine_output_format(&args.output, args.format.clone().as_deref())?;
+
     println!("Input file: {}", args.input);
     println!("Output file: {}", args.output);
-    println!("Quality: {}", args.quality);
+    match fmt{
+        ImageFormat::Avif | ImageFormat::Jpeg | ImageFormat::WebP => {
+            println!("Quality: {}", args.quality);
+            if fmt == ImageFormat::Avif{
+                println!("Speed: {}", args.speed);
+            }
+        }
+        _ => {
+            println!("Quality: Output format not support");
+        }
+    }
     if args.resize.is_some(){
         let temp = args.resize.clone();
         let temp = temp.unwrap();
         println!("Resize: {}x{}", temp.0, temp.1);
 
         if args.method.is_none(){
-            println!("Resize Method: fit")
+            println!("Resize Style: fit")
         }else{
             let temp2 = args.method.clone();
-            println!("Resize Method: {}", temp2.unwrap());
+            println!("Resize Style: {}", temp2.unwrap());
         }
     }
 
-    compress_img(&args.input, &args.output, args.format.as_deref(), args.quality, args.resize, args.method.as_deref())?;
+    compress_img(&args.input, &args.output, args.format.as_deref(), args.quality, args.resize, args.method.as_deref(), args.speed)?;
     Ok(())
 }
